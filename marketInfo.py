@@ -114,7 +114,12 @@ def get_us_market_summary():
     summary = f"<b>【미국장 아침 브리핑 - {today} (서울 시간 기준)】</b>\n\n"
 
     try:
-        tickers = {'다우존스': '^DJI', 'S&P 500': '^GSPC', '나스닥': '^IXIC'}
+        tickers = {
+            '다우존스': '^DJI', 
+            'S&P 500': '^GSPC', 
+            '나스닥': '^IXIC',
+            '러셀 2000': '^RUT',
+        }
         summary += "<b>📊 주요 지수 (최신 종가 / 변화율)</b>\n"
         for name, symbol in tickers.items():
             info = yf.Ticker(symbol).info
@@ -125,6 +130,25 @@ def get_us_market_summary():
         summary += "\n"
     except Exception as e:
         summary += f"(지수 오류: {e})\n\n"
+
+    # VIX 공포지수
+    try:
+        summary += "<b>😱 VIX 공포지수</b>\n"
+        vix = yf.Ticker('^VIX').info
+        vix_price = vix.get('regularMarketPrice') or vix.get('previousClose', 0)
+        vix_pct = vix.get('regularMarketChangePercent', 0)
+        # VIX는 높을수록 공포, 낮을수록 안정
+        if vix_price >= 30:
+            vix_status = "🚨 극심한 공포"
+        elif vix_price >= 20:
+            vix_status = "⚠️ 불안"
+        else:
+            vix_status = "✅ 안정"
+        vix_color = "🔴" if vix_pct >= 0 else "🔵"
+        summary += f"・<b>VIX</b>: {vix_price:.2f} ({vix_pct:+.2f}%) {vix_color} {vix_status}\n"
+        summary += "  <i>(20 미만: 안정 / 20~30: 불안 / 30 이상: 공포)</i>\n\n"
+    except Exception as e:
+        summary += f"(VIX 로드 실패)\n\n"
 
     try:
         sectors = {'기술 (IT)': 'XLK', '금융': 'XLF', '에너지': 'XLE', '소비재': 'XLY', '헬스케어': 'XLV'}
@@ -169,23 +193,94 @@ def get_us_market_summary():
     except Exception as e:
         summary += f"(환율 로드 실패: {e})\n\n"
 
-    summary += "<b>🔥 오늘의 주요 경제 헤드라인 (최근 5개)</b>\n"
+    # 원자재 (금, 원유)
+    try:
+        summary += "<b>🛢️ 원자재</b>\n"
+        # 금
+        gold = yf.Ticker('GC=F').info
+        gold_price = gold.get('regularMarketPrice') or gold.get('previousClose', 0)
+        gold_pct = gold.get('regularMarketChangePercent', 0)
+        gold_color = "🔴" if gold_pct >= 0 else "🔵"
+        summary += f"・<b>금</b>: ${gold_price:,.2f} ({gold_pct:+.2f}%) {gold_color}\n"
+        
+        # WTI 원유
+        oil = yf.Ticker('CL=F').info
+        oil_price = oil.get('regularMarketPrice') or oil.get('previousClose', 0)
+        oil_pct = oil.get('regularMarketChangePercent', 0)
+        oil_color = "🔴" if oil_pct >= 0 else "🔵"
+        summary += f"・<b>WTI 원유</b>: ${oil_price:,.2f} ({oil_pct:+.2f}%) {oil_color}\n"
+        summary += "\n"
+    except Exception as e:
+        summary += f"(원자재 로드 실패)\n\n"
+
+    # 미국 국채 금리
+    try:
+        summary += "<b>📈 미국 국채 금리</b>\n"
+        tnx = yf.Ticker('^TNX').info
+        tnx_price = tnx.get('regularMarketPrice') or tnx.get('previousClose', 0)
+        tnx_pct = tnx.get('regularMarketChangePercent', 0)
+        tnx_color = "🔴" if tnx_pct >= 0 else "🔵"
+        summary += f"・<b>10년물</b>: {tnx_price:.3f}% ({tnx_pct:+.2f}%) {tnx_color}\n"
+        summary += "\n"
+    except Exception as e:
+        summary += f"(금리 로드 실패)\n\n"
+
+    summary += "<b>🔥 오늘의 주요 증시 뉴스 (인기순)</b>\n"
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
-        response = requests.get('https://www.yna.co.kr/rss/economy.xml', headers=headers, timeout=15)
+        # 네이버 증권 - 주요 뉴스 페이지에서 많이 본 뉴스 추출
+        response = requests.get('https://finance.naver.com/news/mainnews.naver', headers=headers, timeout=15)
         response.raise_for_status()
-        feed = feedparser.parse(response.content)
-
-        if not feed.entries:
-            summary += "(RSS 항목 없음)\n\n"
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # mode=RANK 링크가 많이 본 뉴스
+        news_items = []
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            title = link.get_text(strip=True)
+            if 'mode=RANK' in href and title and len(title) > 10:
+                # article_id와 office_id 추출
+                import re
+                article_match = re.search(r'article_id=(\d+)', href)
+                office_match = re.search(r'office_id=(\d+)', href)
+                if article_match and office_match:
+                    news_items.append({
+                        'title': title, 
+                        'href': href,
+                        'article_id': article_match.group(1),
+                        'office_id': office_match.group(1)
+                    })
+        
+        if not news_items:
+            summary += "(뉴스 항목 없음)\n\n"
         else:
-            for entry in feed.entries[:5]:
-                title = html.escape(entry.title.strip())
-                link = entry.link.strip()
-                published = entry.get('published', 'N/A').strip()
-                short_title = title[:70] + "..." if len(title) > 70 else title
-                summary += f"• <a href=\"{link}\">{short_title}</a>\n"
-                summary += f"  {published}\n\n"
+            for item in news_items[:5]:
+                title = html.escape(item['title'])
+                # 네이버 뉴스 원문 링크
+                news_url = f"https://n.news.naver.com/mnews/article/{item['office_id']}/{item['article_id']}"
+                short_title = title[:50] + "..." if len(title) > 50 else title
+                
+                # 기사 본문 첫 문장 가져오기
+                try:
+                    article_resp = requests.get(news_url, headers=headers, timeout=5)
+                    if article_resp.status_code == 200:
+                        article_soup = BeautifulSoup(article_resp.content, 'html.parser')
+                        # 본문 영역 찾기
+                        article_body = article_soup.select_one('#dic_area, .newsct_article, article')
+                        if article_body:
+                            text = article_body.get_text(strip=True)
+                            # 첫 80자 추출
+                            snippet = text[:80].replace('\n', ' ').strip()
+                            if len(text) > 80:
+                                snippet += "..."
+                            summary += f"• <a href=\"{news_url}\">{short_title}</a>\n  <i>→ {html.escape(snippet)}</i>\n"
+                        else:
+                            summary += f"• <a href=\"{news_url}\">{short_title}</a>\n"
+                    else:
+                        summary += f"• <a href=\"{news_url}\">{short_title}</a>\n"
+                except:
+                    summary += f"• <a href=\"{news_url}\">{short_title}</a>\n"
+            summary += "\n"
     except Exception as e:
         summary += f"(뉴스 로드 실패: {str(e)})\n\n"
 
