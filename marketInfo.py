@@ -151,12 +151,22 @@ def get_us_market_summary():
         summary += f"(VIX 로드 실패)\n\n"
 
     try:
-        sectors = {'기술 (IT)': 'XLK', '금융': 'XLF', '에너지': 'XLE', '소비재': 'XLY', '헬스케어': 'XLV'}
-        summary += "<b>섹터별 변화율 (최근 종가 기준)</b>\n"
-        for name, etf in sectors.items():
-            pct = yf.Ticker(etf).info.get('regularMarketChangePercent', 'N/A')
+        # S&P 500 비중 상위 8개 섹터 (대표 기업 포함)
+        sectors = {
+            '기술': {'etf': 'XLK', 'top': 'AAPL, MSFT, NVDA'},
+            '헬스케어': {'etf': 'XLV', 'top': 'UNH, JNJ, LLY'},
+            '금융': {'etf': 'XLF', 'top': 'BRK.B, JPM, V'},
+            '경기소비재': {'etf': 'XLY', 'top': 'AMZN, TSLA, HD'},
+            '통신서비스': {'etf': 'XLC', 'top': 'META, GOOGL, NFLX'},
+            '산업재': {'etf': 'XLI', 'top': 'GE, CAT, UNP'},
+            '필수소비재': {'etf': 'XLP', 'top': 'PG, KO, PEP'},
+            '에너지': {'etf': 'XLE', 'top': 'XOM, CVX, COP'},
+        }
+        summary += "<b>📈 섹터별 변화율 (S&P 500 비중순)</b>\n"
+        for name, data in sectors.items():
+            pct = yf.Ticker(data['etf']).info.get('regularMarketChangePercent', 'N/A')
             color = "🔴" if pct >= 0 else "🔵"
-            summary += f"・<b>{name}</b>: {pct:+.2f}% {color}\n"
+            summary += f"・<b>{name}</b>: {pct:+.2f}% {color} ({data['top']})\n"
         summary += "\n"
     except Exception:
         summary += "(섹터 로드 실패)\n\n"
