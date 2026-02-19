@@ -15,6 +15,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from PIL import Image
 import io
 import time
+from bs4 import BeautifulSoup
 
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -77,6 +78,37 @@ def capture_finviz_map():
         print(f"핀비즈 캡처 실패: {e}")
         return None
 
+def get_economic_calendar():
+    """오늘의 주요 경제 이벤트를 가져옵니다."""
+    events = []
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    
+    # Yahoo Finance 실적 발표 일정
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        earnings_url = f"https://finance.yahoo.com/calendar/earnings?day={today}"
+        response = requests.get(earnings_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            rows = soup.select('table tbody tr')
+            for row in rows[:5]:
+                cells = row.select('td')
+                if len(cells) >= 2:
+                    ticker = cells[0].get_text(strip=True)
+                    company = cells[1].get_text(strip=True)
+                    name = company if company else ticker
+                    if name and len(name) > 1:
+                        if len(name) > 30:
+                            name = name[:27] + "..."
+                        events.append({'time': '', 'name': f"{name} 실적 발표", 'importance': 2})
+    except Exception as e:
+        print(f"Yahoo 실적 로드 실패: {e}")
+    
+    return events[:5] if events else None
+
 def get_us_market_summary():
     today = datetime.now().strftime("%Y-%m-%d")
     summary = f"<b>【미국장 아침 브리핑 - {today} (서울 시간 기준)】</b>\n\n"
@@ -88,7 +120,8 @@ def get_us_market_summary():
             info = yf.Ticker(symbol).info
             price = info.get('regularMarketPrice') or info.get('previousClose', 'N/A')
             pct = info.get('regularMarketChangePercent', 'N/A')
-            summary += f"・<b>{name}</b>: {price:,.2f} ({pct:+.2f}%)\n"
+            color = "🔴" if pct >= 0 else "🔵"
+            summary += f"・<b>{name}</b>: {price:,.2f} ({pct:+.2f}%) {color}\n"
         summary += "\n"
     except Exception as e:
         summary += f"(지수 오류: {e})\n\n"
@@ -98,10 +131,43 @@ def get_us_market_summary():
         summary += "<b>섹터별 변화율 (최근 종가 기준)</b>\n"
         for name, etf in sectors.items():
             pct = yf.Ticker(etf).info.get('regularMarketChangePercent', 'N/A')
-            summary += f"・<b>{name}</b>: {pct:+.2f}%\n"
+            color = "🔴" if pct >= 0 else "🔵"
+            summary += f"・<b>{name}</b>: {pct:+.2f}% {color}\n"
         summary += "\n"
     except Exception:
         summary += "(섹터 로드 실패)\n\n"
+
+    # 환율 정보 (원화 기준)
+    try:
+        summary += "<b>💱 환율 (원화 기준)</b>\n"
+        currencies = {
+            '달러/원': 'KRW=X',
+            '엔/원 (100엔)': 'KRWJPY=X',
+            '유로/원': 'EURKRW=X',
+        }
+        # USD/KRW
+        usd_krw = yf.Ticker('KRW=X').info
+        usd_price = usd_krw.get('regularMarketPrice') or usd_krw.get('previousClose', 0)
+        usd_pct = usd_krw.get('regularMarketChangePercent', 0)
+        usd_color = "🔴" if usd_pct >= 0 else "🔵"
+        summary += f"・<b>달러/원</b>: {usd_price:,.2f}원 ({usd_pct:+.2f}%) {usd_color}\n"
+        
+        # JPY/KRW (100엔 기준)
+        jpy_krw = yf.Ticker('JPYKRW=X').info
+        jpy_price = jpy_krw.get('regularMarketPrice') or jpy_krw.get('previousClose', 0)
+        jpy_pct = jpy_krw.get('regularMarketChangePercent', 0)
+        jpy_color = "🔴" if jpy_pct >= 0 else "🔵"
+        summary += f"・<b>엔/원 (100엔)</b>: {jpy_price * 100:,.2f}원 ({jpy_pct:+.2f}%) {jpy_color}\n"
+        
+        # EUR/KRW
+        eur_krw = yf.Ticker('EURKRW=X').info
+        eur_price = eur_krw.get('regularMarketPrice') or eur_krw.get('previousClose', 0)
+        eur_pct = eur_krw.get('regularMarketChangePercent', 0)
+        eur_color = "🔴" if eur_pct >= 0 else "🔵"
+        summary += f"・<b>유로/원</b>: {eur_price:,.2f}원 ({eur_pct:+.2f}%) {eur_color}\n"
+        summary += "\n"
+    except Exception as e:
+        summary += f"(환율 로드 실패: {e})\n\n"
 
     summary += "<b>🔥 오늘의 주요 경제 헤드라인 (최근 5개)</b>\n"
     try:
@@ -123,11 +189,19 @@ def get_us_market_summary():
     except Exception as e:
         summary += f"(뉴스 로드 실패: {str(e)})\n\n"
 
-    summary += "<b>📅 오늘 주목할 이벤트 & 포인트</b>\n"
-    summary += "• Walmart 실적 발표 → 소비 심리 & 소매 섹터 방향성\n"
-    summary += "• 유가 상승 지속 → 에너지 섹터 지지\n"
-    summary += "• Fed 회의록 소화 중 → 금리 인하 기대 vs 인플레 우려\n"
-    summary += "• AI/빅테크 랠리 여부 → Nvidia, Amazon 등 움직임\n\n"
+    summary += "<b>📅 오늘 주목할 경제 이벤트 (미국)</b>\n"
+    try:
+        calendar_events = get_economic_calendar()
+        if calendar_events:
+            for event in calendar_events:
+                importance_stars = "⭐" * event['importance']
+                time_str = f"[{event['time']}] " if event['time'] else ""
+                summary += f"• {time_str}{event['name']} {importance_stars}\n"
+        else:
+            summary += "• 오늘 주요 경제 이벤트 없음\n"
+    except Exception as e:
+        summary += f"• (경제 캘린더 로드 실패)\n"
+    summary += "\n"
 
     summary += "더 자세한 내용은 Yahoo Finance, CNBC에서 확인하세요!\n#미국장 #경제브리핑"
 
@@ -148,7 +222,9 @@ async def send_message():
 
         print(f"전송 대상 채팅방 수: {len(chat_ids)}")
 
-        map_image = capture_finviz_map()
+        # 핀비즈 맵 캡처 비활성화
+        # map_image = capture_finviz_map()
+        map_image = None
 
         for chat_id in chat_ids:
             try:
@@ -160,11 +236,12 @@ async def send_message():
                 )
 
                 if map_image:
-                    await bot.send_photo(
-                        chat_id=chat_id,
-                        photo=map_image,
-                        caption="현재 핀비즈 섹터 맵 )"
-                    )
+                    pass  # 핀비즈 맵 전송 비활성화
+                    # await bot.send_photo(
+                    #     chat_id=chat_id,
+                    #     photo=map_image,
+                    #     caption="현재 핀비즈 섹터 맵 )"
+                    # )
 
                 print(f"[{chat_id}] 전송 완료")
                 await asyncio.sleep(1.5)
