@@ -28,7 +28,8 @@ bot = Bot(token=BOT_TOKEN)
 async def get_all_chat_ids():
     chat_ids = set()
     try:
-        updates = await bot.get_updates(offset=-1, limit=100, timeout=30)
+        # offset 없이 호출하여 모든 pending 업데이트 가져오기
+        updates = await bot.get_updates(limit=100, timeout=10)
         for update in updates:
             if update.message:
                 chat_ids.add(str(update.message.chat.id))
@@ -308,7 +309,6 @@ def get_us_market_summary():
         summary += f"• (경제 캘린더 로드 실패)\n"
     summary += "\n"
 
-    summary += "더 자세한 내용은 Yahoo Finance, CNBC에서 확인하세요!\n#미국장 #경제브리핑"
 
     print("\n=== 실제 메시지 일부 ===\n")
     print(summary[:1200])
