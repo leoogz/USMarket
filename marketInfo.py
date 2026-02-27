@@ -4,6 +4,7 @@ from telegram import Bot
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+import json
 import yfinance as yf
 import html
 import requests
@@ -25,10 +26,34 @@ if not BOT_TOKEN:
 
 bot = Bot(token=BOT_TOKEN)
 
-async def get_all_chat_ids():
-    chat_ids = set()
+# chat_ids.json 파일 경로
+CHAT_IDS_FILE = os.path.join(os.path.dirname(__file__), 'chat_ids.json')
+
+def load_chat_ids():
+    """저장된 chat_id 목록을 파일에서 로드"""
     try:
-        # offset 없이 호출하여 모든 pending 업데이트 가져오기
+        if os.path.exists(CHAT_IDS_FILE):
+            with open(CHAT_IDS_FILE, 'r') as f:
+                return set(json.load(f))
+    except Exception as e:
+        print(f"chat_ids.json 로드 실패: {e}")
+    return set()
+
+def save_chat_ids(chat_ids):
+    """chat_id 목록을 파일에 저장"""
+    try:
+        with open(CHAT_IDS_FILE, 'w') as f:
+            json.dump(list(chat_ids), f)
+    except Exception as e:
+        print(f"chat_ids.json 저장 실패: {e}")
+
+async def get_all_chat_ids():
+    """저장된 chat_id + 새로운 업데이트에서 발견된 chat_id 반환"""
+    # 1. 파일에서 기존 chat_id 로드
+    chat_ids = load_chat_ids()
+    
+    # 2. 새 업데이트에서 chat_id 추가 수집
+    try:
         updates = await bot.get_updates(limit=100, timeout=10)
         for update in updates:
             if update.message:
@@ -37,10 +62,13 @@ async def get_all_chat_ids():
                 chat_ids.add(str(update.channel_post.chat.id))
             elif update.my_chat_member:
                 chat_ids.add(str(update.my_chat_member.chat.id))
-        return list(chat_ids)
+        
+        # 3. 새로 발견된 chat_id가 있으면 파일에 저장
+        save_chat_ids(chat_ids)
     except Exception as e:
-        print(f"채팅방 목록 가져오기 실패: {e}")
-        return []
+        print(f"업데이트 조회 실패: {e}")
+    
+    return list(chat_ids)
 
 def capture_finviz_map():
     try:
